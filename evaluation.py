@@ -4,8 +4,9 @@ import argparse
 import time
 import torch
 from typing import List
-from torch.utils.data import DataLoader
-from torchvision.datasets import ImageFolder
+# from torch.utils.data import DataLoader
+# from torchvision.datasets import ImageFolder
+import torchvision
 from transformers import DeiTFeatureExtractor, ViTFeatureExtractor
 from runtime import forward_hook_quant_encode, forward_pre_hook_quant_decode
 from utils.data import ViTFeatureExtractorTransforms
@@ -44,12 +45,37 @@ def _make_shard(model_name, model_file, stage_layers, stage, q_bits):
     shard.eval()
     return shard
 
+def pruning_function(shard, sparsity):
+    """Apply pruning to the model shard based on sparsity value"""
+    masks = []
+    for name, param in shard.named_parameters():
+        if 'mask' in name:
+            masks.append(param)
+    total = sum([param.numel() for param in masks])
+    num_prune = int(total * sparsity)
+
+    if num_prune < 1:
+        return shard
+
+    masks_sorted = sorted(masks, key=lambda x: x.sum(), reverse=True)
+    count = 0
+    for mask in masks_sorted:
+        mask_pruned = mask.clone()
+        mask_pruned[mask_pruned < 0.5] = 0
+        count += mask_pruned.sum()
+        if count >= num_prune:
+            break
+    for mask, mask_pruned in zip(masks, masks_sorted):
+        mask.data.copy_(mask_pruned)
+
+    return shard
 def _forward_model(input_tensor, model_shards):
     num_shards = len(model_shards)
     temp_tensor = input_tensor
+    # sparsity=0.95
     for idx in range(num_shards):
         shard = model_shards[idx]
-
+        # shard=pruning_function(shard,sparsity)
         # decoder
         if idx != 0:
             temp_tensor = forward_pre_hook_quant_decode(shard, temp_tensor)
@@ -91,19 +117,19 @@ def evaluation(args):
         feature_extractor = DeiTFeatureExtractor.from_pretrained(model_name)
     else:
         feature_extractor = ViTFeatureExtractor.from_pretrained(model_name)
-
     val_transform = ViTFeatureExtractorTransforms(feature_extractor)
-    val_dataset = ImageFolder(os.path.join(dataset_path, dataset_split),
+    val_dataset = torchvision.datasets.ImageFolder(os.path.join(dataset_path, dataset_split),
                             transform = val_transform)
-    val_loader = DataLoader(
+
+    print(val_dataset)
+    from torchvision.transforms import ToTensor
+    val_loader = torch.utils.data.DataLoader(
         val_dataset,
         batch_size = batch_size,
         num_workers = num_workers,
         shuffle=True,
-        pin_memory=True
+        pin_memory=True,
     )
-
-    # model config
     def _get_default_quant(n_stages: int) -> List[int]:
         return [0] * n_stages
     parts = [int(i) for i in partition.split(',')]
@@ -125,7 +151,7 @@ def evaluation(args):
     start_time = time.time()
     acc_reporter = ReportAccuracy(batch_size, output_dir, model_name, partition, stage_quant[0])
     with torch.no_grad():
-        for batch_idx, (input, target) in enumerate(val_loader):
+        for batch_idx, (input, target) in enumerate(val_loader):           
             if batch_idx == num_stop_batch and num_stop_batch:
                 break
             output = _forward_model(input, model_shards)
@@ -136,7 +162,6 @@ def evaluation(args):
     print(f"Final Accuracy: {100*acc_reporter.total_acc}; Quant Bitwidth: {stage_quant}")
     end_time = time.time()
     print(f"total time = {end_time - start_time}")
-
 
 if __name__ == "__main__":
     """Main function."""

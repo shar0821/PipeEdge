@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Optional, Tuple, Type, Union
 import torch
 from torch import nn
 from torch.distributed import rpc
-from .. import DistCmdHandler, DistContext
+from src.pipeedge.comm import DistCmdHandler, DistContext
 
 
 def tensorpipe_rpc_backend_options_factory(*args, **kwargs):

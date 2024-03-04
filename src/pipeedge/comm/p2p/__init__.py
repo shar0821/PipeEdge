@@ -6,7 +6,7 @@ import time
 from typing import Any, Callable, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
-from .. import DistCmdHandler, DistContext
+from src.pipeedge.comm import DistCmdHandler, DistContext
 from . import util
 
 # Base tag values

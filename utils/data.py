@@ -1,17 +1,17 @@
 """Data utilities."""
 import random
 from typing import Callable, Optional, Sequence, Tuple, Union
+from scipy import datasets
 import torch
 from torch.utils.data import Dataset, Subset
 from torchvision.transforms import ToTensor, Normalize, Resize, Compose
-
 
 class ViTFeatureExtractorTransforms:
     def __init__(self, feature_extractor):
         transform = []
 
         if feature_extractor.do_resize:
-            transform.append(Resize([feature_extractor.size, feature_extractor.size]))
+            transform.append(Resize(list(feature_extractor.size.values())))
 
         transform.append(ToTensor())
 
@@ -74,7 +74,7 @@ def load_dataset_glue(tokenizer: Callable, config: str, split: str, ubatch_size:
                       tok_padding: Union[bool, str]=True) -> Dataset:
     """Create a GLUE dataset."""
     # pylint: disable=import-outside-toplevel
-    import datasets
+    
     # When doing inference in batches (ubatch_size > 1), each item (tokenized sentence) in a batch
     # must have the same length, which requires padding shorter sentences in the batch.
     # 'transform' only operates on single items, so we'd be forced to use padding='max_length',

@@ -1,0 +1,7 @@
+{
+    "python.analysis.extraPaths": [
+        "./src/pipeedge/models",
+        "./src/pipeedge/comm",
+        "./src/pipeedge/comm/rp"
+    ]
+}
