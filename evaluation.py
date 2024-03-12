@@ -8,6 +8,7 @@ from typing import List
 # from torchvision.datasets import ImageFolder
 import torchvision
 from transformers import DeiTFeatureExtractor, ViTFeatureExtractor
+from torch.nn.utils import prune
 from runtime import forward_hook_quant_encode, forward_pre_hook_quant_decode
 from utils.data import ViTFeatureExtractorTransforms
 import model_cfg
@@ -47,35 +48,34 @@ def _make_shard(model_name, model_file, stage_layers, stage, q_bits):
 
 def pruning_function(shard, sparsity):
     """Apply pruning to the model shard based on sparsity value"""
-    masks = []
-    for name, param in shard.named_parameters():
-        if 'mask' in name:
-            masks.append(param)
-    total = sum([param.numel() for param in masks])
-    num_prune = int(total * sparsity)
+    for i in range(len(shard.vit.layers)):
+        #print("Layer {}".format(i))
+        #Prune Layers that have intermediate and output layers
+        # print(shard.vit.layers[i])
 
-    if num_prune < 1:
-        return shard
-
-    masks_sorted = sorted(masks, key=lambda x: x.sum(), reverse=True)
-    count = 0
-    for mask in masks_sorted:
-        mask_pruned = mask.clone()
-        mask_pruned[mask_pruned < 0.5] = 0
-        count += mask_pruned.sum()
-        if count >= num_prune:
-            break
-    for mask, mask_pruned in zip(masks, masks_sorted):
-        mask.data.copy_(mask_pruned)
-
+        #Pruning for self attention,output layers
+        # if(shard.vit.layers[i].self_attention):
+        #     prune.ln_structured(shard.vit.layers[i].self_attention.query, 'weight', sparsity, 2.0, dim=0)
+        #     prune.ln_structured(shard.vit.layers[i].self_attention.key, 'weight', sparsity, 2.0, dim=0)
+        #     prune.ln_structured(shard.vit.layers[i].self_attention.value, 'weight', sparsity, 2.0, dim=0)
+        # if(shard.vit.layers[i].self_output):
+        #     prune.ln_structured(shard.vit.layers[i].self_output.dense, 'weight', sparsity, 2.0, dim=0)
+        if(shard.vit.layers[i].intermediate):
+            print("Weights before pruning:")
+            print(shard.vit.layers[i].intermediate.dense.weight)
+            prune.ln_structured(shard.vit.layers[i].intermediate.dense, 'weight', sparsity, 2.0, dim=0)
+            print("Weights after pruning:")
+            print(shard.vit.layers[i].intermediate.dense.weight)
+        # if(shard.vit.layers[i].output):
+        #     prune.ln_structured(shard.vit.layers[i].output.dense, 'weight', sparsity, 2.0, dim=0)
     return shard
 def _forward_model(input_tensor, model_shards):
     num_shards = len(model_shards)
     temp_tensor = input_tensor
-    # sparsity=0.95
+    sparsity=0.3
     for idx in range(num_shards):
         shard = model_shards[idx]
-        # shard=pruning_function(shard,sparsity)
+        shard=pruning_function(shard,sparsity)
         # decoder
         if idx != 0:
             temp_tensor = forward_pre_hook_quant_decode(shard, temp_tensor)
