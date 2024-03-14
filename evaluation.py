@@ -46,33 +46,54 @@ def _make_shard(model_name, model_file, stage_layers, stage, q_bits):
     shard.eval()
     return shard
 
+def calculate_threshold(layer, percentage):
+    weights = layer.weight.data.abs().clone().cpu().numpy()
+    num_weights = weights.size
+    cutoff_index = int(num_weights * percentage)
+    cutoff_threshold = sorted(weights.flatten())[cutoff_index]
+    return cutoff_threshold
+
 def pruning_function(shard, sparsity):
     """Apply pruning to the model shard based on sparsity value"""
     for i in range(len(shard.vit.layers)):
-        #print("Layer {}".format(i))
-        #Prune Layers that have intermediate and output layers
-        # print(shard.vit.layers[i])
-
         #Pruning for self attention,output layers
         # if(shard.vit.layers[i].self_attention):
-        #     prune.ln_structured(shard.vit.layers[i].self_attention.query, 'weight', sparsity, 2.0, dim=0)
-        #     prune.ln_structured(shard.vit.layers[i].self_attention.key, 'weight', sparsity, 2.0, dim=0)
-        #     prune.ln_structured(shard.vit.layers[i].self_attention.value, 'weight', sparsity, 2.0, dim=0)
-        # if(shard.vit.layers[i].self_output):
-        #     prune.ln_structured(shard.vit.layers[i].self_output.dense, 'weight', sparsity, 2.0, dim=0)
+        #     thresh_query=calculate_threshold(shard.vit.layers[i].self_attention.query,sparsity)
+        #     prune.l1_unstructured(shard.vit.layers[i].self_attention.query, 'weight',amount=thresh_query)
+        #     prune.remove(shard.vit.layers[i].self_attention.query, 'weight')
+        #     #------------------------
+        #     thresh_key=calculate_threshold(shard.vit.layers[i].self_attention.key,sparsity)
+        #     prune.l1_unstructured(shard.vit.layers[i].self_attention.key, 'weight', amount=thresh_key)
+        #     prune.remove(shard.vit.layers[i].self_attention.key, 'weight')
+        #     #----------------------------
+        #     thresh_value=calculate_threshold(shard.vit.layers[i].self_attention.value,sparsity)
+        #     prune.l1_unstructured(shard.vit.layers[i].self_attention.value, 'weight',amount=thresh_value)
+        #     prune.remove(shard.vit.layers[i].self_attention.value, 'weight')
+        if(shard.vit.layers[i].self_output):
+            
+            threshold_output=calculate_threshold(shard.vit.layers[i].self_output.dense,sparsity)
+            prune.l1_unstructured(shard.vit.layers[i].self_output.dense, name='weight', amount=threshold_output)
+            print("Is self_output layer pruned?:",prune.is_pruned(shard.vit.layers[i].self_output.dense))
+            prune.remove(shard.vit.layers[i].self_output.dense, 'weight')
         if(shard.vit.layers[i].intermediate):
-            print("Weights before pruning:")
-            print(shard.vit.layers[i].intermediate.dense.weight)
-            prune.ln_structured(shard.vit.layers[i].intermediate.dense, 'weight', sparsity, 2.0, dim=0)
-            print("Weights after pruning:")
-            print(shard.vit.layers[i].intermediate.dense.weight)
-        # if(shard.vit.layers[i].output):
-        #     prune.ln_structured(shard.vit.layers[i].output.dense, 'weight', sparsity, 2.0, dim=0)
+            threshold_intermediate = calculate_threshold(shard.vit.layers[i].intermediate.dense, sparsity)
+            # Apply magnitude-based pruning based on the calculated thresholds
+            prune.l1_unstructured(shard.vit.layers[i].intermediate.dense, name='weight', amount=threshold_intermediate)
+            print("Is intermediate layer pruned?:",prune.is_pruned(shard.vit.layers[i].intermediate.dense))
+            prune.remove(shard.vit.layers[i].intermediate.dense, 'weight')
+        if(shard.vit.layers[i].output):
+            threshold_output = calculate_threshold(shard.vit.layers[i].output.dense, sparsity)
+            # Apply magnitude-based pruning based on the calculated thresholds
+            prune.l1_unstructured(shard.vit.layers[i].output.dense, name='weight', amount=threshold_output)
+            print("Is output layer pruned?:",prune.is_pruned(shard.vit.layers[i].output.dense))
+            prune.remove(shard.vit.layers[i].output.dense, 'weight')
+            
+
     return shard
 def _forward_model(input_tensor, model_shards):
     num_shards = len(model_shards)
     temp_tensor = input_tensor
-    sparsity=0.3
+    sparsity=0.30
     for idx in range(num_shards):
         shard = model_shards[idx]
         shard=pruning_function(shard,sparsity)
